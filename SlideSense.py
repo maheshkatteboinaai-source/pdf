@@ -204,7 +204,7 @@ if page == "🖼 Image Recognition":
 
     with col2:
         st.markdown("## 🖼 Image Recognition")
-        st.markdown("Upload an image and let AI describe it.")
+        st.markdown("Upload an image, get AI description, and ask questions about it.")
 
     st.divider()
 
@@ -214,7 +214,46 @@ if page == "🖼 Image Recognition":
         img = Image.open(img_file)
         st.image(img, use_column_width=True)
 
-        with st.spinner("🤖 Processing image..."):
-            desc = describe_image(img)
+        # ---------- IMAGE DESCRIPTION ----------
+        with st.spinner("🤖 Analyzing image..."):
+            short_desc = describe_image(img)
 
-        st.success(desc)
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+            prompt = f"""
+            The image caption is: "{short_desc}"
+
+            Generate a detailed description of the image in at least 4 meaningful lines.
+            Describe:
+            - Objects
+            - Scene
+            - Environment
+            - Possible context or activity
+            """
+            detailed_desc = llm.invoke(prompt)
+
+        st.markdown("### 📝 AI Image Description")
+        st.success(detailed_desc.content)
+
+        st.divider()
+
+        # ---------- QUESTION ANSWER SECTION ----------
+        st.markdown("### 💬 Ask Questions About the Image")
+
+        img_question = st.text_input("Ask a question about this image:")
+
+        if img_question:
+            with st.spinner("🤖 Thinking..."):
+                qa_prompt = f"""
+                Image description:
+                {detailed_desc.content}
+
+                Question:
+                {img_question}
+
+                Answer clearly based only on the image description.
+                """
+
+                answer = llm.invoke(qa_prompt)
+
+            st.markdown("#### 🤖 AI Answer")
+            st.success(answer.content)
