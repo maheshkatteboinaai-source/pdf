@@ -17,14 +17,21 @@ st.set_page_config(page_title="SlideSense", page_icon="📘", layout="wide")
 
 # -------------------- Lottie Loader --------------------
 def load_lottie(url):
-    r = requests.get(url)
-    if r.status_code != 200:
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except:
         return None
-    return r.json()
+
+def safe_lottie(anim, height=200):
+    if anim:
+        st_lottie(anim, height=height)
 
 # Animations
 login_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_jcikwtux.json")
-pdf_anim = load_lottie("https://assets9.lottiefiles.com/packages/lf20_q5pk6p1k.json")
+pdf_anim   = load_lottie("https://assets9.lottiefiles.com/packages/lf20_q5pk6p1k.json")
 image_anim = load_lottie("https://assets2.lottiefiles.com/packages/lf20_iorpbol0.json")
 
 # -------------------- Session --------------------
@@ -43,7 +50,7 @@ def login_ui():
     col1, col2 = st.columns([1, 1])
 
     with col1:
-        st_lottie(login_anim, height=300)
+        safe_lottie(login_anim, 300)
 
     with col2:
         st.markdown("## 🔐 Welcome to SlideSense")
@@ -110,7 +117,7 @@ if page == "📘 PDF Analyzer":
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        st_lottie(pdf_anim, height=200)
+        safe_lottie(pdf_anim, 200)
 
     with col2:
         st.markdown("## 📘 PDF Analyzer")
@@ -200,7 +207,7 @@ if page == "🖼 Image Recognition":
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        st_lottie(image_anim, height=200)
+        safe_lottie(image_anim, 200)
 
     with col2:
         st.markdown("## 🖼 Image Recognition")
