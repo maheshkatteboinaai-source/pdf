@@ -11,34 +11,36 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
 import torch
+import tempfile
+import os
+import pytesseract
+from cohere import Client as CohereClient
 
-# -------------------- Page Config --------------------
+# -------------------- PAGE CONFIG --------------------
 st.set_page_config(page_title="SlideSense", page_icon="📘", layout="wide")
 
-# -------------------- Lottie Loader (SAFE) --------------------
+# -------------------- LOTTIE --------------------
 def load_lottie(url: str):
     try:
         r = requests.get(url, timeout=5)
         if r.status_code != 200:
             return None
         data = r.json()
-        if "v" not in data:  # basic validation for lottie json
+        if "v" not in data:
             return None
         return data
-    except Exception:
+    except:
         return None
-
 
 def safe_lottie(anim, height=200):
     if isinstance(anim, dict):
-        st_lottie(anim, height=height, key=str(height))
-
+        st_lottie(anim, height=height)
 
 login_anim = load_lottie("https://assets10.lottiefiles.com/packages/lf20_jcikwtux.json")
 pdf_anim   = load_lottie("https://assets9.lottiefiles.com/packages/lf20_q5pk6p1k.json")
 image_anim = load_lottie("https://assets2.lottiefiles.com/packages/lf20_iorpbol0.json")
 
-# -------------------- Session Defaults --------------------
+# -------------------- SESSION DEFAULTS --------------------
 defaults = {
     "chat_history": [],
     "vector_db": None,
@@ -50,7 +52,7 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# -------------------- Auth UI --------------------
+# -------------------- AUTH UI --------------------
 def login_ui():
     col1, col2 = st.columns([1, 1])
 
@@ -59,8 +61,6 @@ def login_ui():
 
     with col2:
         st.markdown("## 🔐 Welcome to SlideSense")
-        st.markdown("### AI Powered Learning Platform")
-
         tab1, tab2 = st.tabs(["Login", "Sign Up"])
 
         with tab1:
@@ -83,30 +83,12 @@ def login_ui():
                     st.session_state.users[nu] = np
                     st.success("Account created 🎉")
 
-# -------------------- BLIP (cached & safe) --------------------
-@st.cache_resource
-def load_blip():
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
-    model.eval()
-    return processor, model
-
-
-processor, blip_model = load_blip()
-
-
-def describe_image(image):
-    inputs = processor(image, return_tensors="pt")
-    with torch.no_grad():
-        out = blip_model.generate(**inputs, max_new_tokens=50)
-    return processor.decode(out[0], skip_special_tokens=True)
-
-# -------------------- Auth Check --------------------
+# -------------------- AUTH CHECK --------------------
 if not st.session_state.authenticated:
     login_ui()
     st.stop()
 
-# -------------------- Sidebar --------------------
+# -------------------- SIDEBAR --------------------
 st.sidebar.success("Logged in ✅")
 
 if st.sidebar.button("Logout"):
@@ -116,16 +98,48 @@ if st.sidebar.button("Logout"):
 
 page = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Recognition"])
 
-st.sidebar.markdown("### 💬 History")
-for q, a in st.session_state.chat_history[-8:]:
-    st.sidebar.markdown(f"- {q[:30]}")
-
-# -------------------- Gemini LLM --------------------
+# -------------------- GEMINI LLM --------------------
 def get_llm():
+    api_key = st.secrets.get("GOOGLE_API_KEY")
+    if not api_key:
+        st.error("Missing GOOGLE_API_KEY in secrets.")
+        st.stop()
     return ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
-        google_api_key=st.secrets.get("GOOGLE_API_KEY", None),
+        google_api_key=api_key,
     )
+
+# -------------------- COHERE --------------------
+def get_cohere_client():
+    api_key = st.secrets.get("COHERE_API_KEY")
+    if not api_key:
+        st.error("Missing COHERE_API_KEY in secrets.")
+        st.stop()
+    return CohereClient(api_key=api_key, timeout=60)
+
+def generate_text_with_cohere(prompt):
+    cohere_client = get_cohere_client()
+    response = cohere_client.generate(
+        model="command-xlarge-nightly",
+        prompt=prompt,
+        temperature=0.7,
+        max_tokens=800,
+    )
+    return response.generations[0].text.strip()
+
+# -------------------- CACHE MODELS --------------------
+@st.cache_resource
+def load_embeddings():
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
+
+@st.cache_resource
+def load_blip():
+    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+    model.eval()
+    return processor, model
 
 # ========================= PDF ANALYZER =========================
 if page == "📘 PDF Analyzer":
@@ -143,24 +157,26 @@ if page == "📘 PDF Analyzer":
     pdf = st.file_uploader("Upload PDF", type="pdf")
 
     if pdf:
-        # reset vector DB if new file uploaded
         if st.session_state.current_pdf != pdf.name:
             st.session_state.vector_db = None
             st.session_state.current_pdf = pdf.name
 
         if st.session_state.vector_db is None:
-            with st.spinner("🧠 Processing your document..."):
-
+            with st.spinner("Processing document..."):
                 reader = PdfReader(pdf)
-                text = "\n".join(p.extract_text() or "" for p in reader.pages)
+                text = ""
+                for page_obj in reader.pages:
+                    content = page_obj.extract_text()
+                    if content:
+                        text += content + "\n"
 
-                splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=80)
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=500,
+                    chunk_overlap=80
+                )
                 chunks = splitter.split_text(text)
 
-                embeddings = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
-
+                embeddings = load_embeddings()
                 st.session_state.vector_db = FAISS.from_texts(chunks, embeddings)
 
         st.success("PDF Ready 🚀")
@@ -168,12 +184,13 @@ if page == "📘 PDF Analyzer":
         q = st.text_input("Ask your question")
 
         if q:
-            with st.spinner("🤖 Generating answer..."):
-
+            with st.spinner("Generating answer..."):
                 docs = st.session_state.vector_db.similarity_search(q, k=5)
                 llm = get_llm()
 
-                history = "\n".join(f"Q:{x}\nA:{y}" for x, y in st.session_state.chat_history[-5:])
+                history = "\n".join(
+                    f"Q:{x}\nA:{y}" for x, y in st.session_state.chat_history[-5:]
+                )
 
                 prompt = ChatPromptTemplate.from_template("""
 History:
@@ -191,8 +208,11 @@ Rules:
 """)
 
                 chain = create_stuff_documents_chain(llm, prompt)
-
-                res = chain.invoke({"context": docs, "question": q, "history": history})
+                res = chain.invoke({
+                    "context": docs,
+                    "question": q,
+                    "history": history
+                })
 
                 st.session_state.chat_history.append((q, res))
 
@@ -210,49 +230,72 @@ if page == "🖼 Image Recognition":
         safe_lottie(image_anim, 200)
 
     with col2:
-        st.markdown("## 🖼 Image Recognition")
-        st.markdown("Upload an image, get AI description, and ask questions about it.")
+        st.markdown("## 🖼 VisionText Image QA")
 
     st.divider()
 
-    img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
+    uploaded_file = st.file_uploader(
+        "Upload Image",
+        type=["png", "jpg", "jpeg"]
+    )
 
-    if img_file:
-        img = Image.open(img_file)
-        st.image(img, use_container_width=True)
+    if uploaded_file:
 
-        with st.spinner("🤖 Analyzing image..."):
-            short_desc = describe_image(img)
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_path = os.path.join(temp_dir.name, uploaded_file.name)
 
-            llm = get_llm()
+        with open(temp_path, "wb") as f:
+            f.write(uploaded_file.getvalue())
 
-            detailed_desc = llm.invoke(f"""
-The image caption is: "{short_desc}"
+        st.image(temp_path, use_container_width=True)
 
-Generate a detailed description in at least 4 meaningful lines.
-Describe objects, scene, environment, and possible activity.
-""")
+        # --- IMAGE CLASSIFICATION ---
+        def classify_image(image_path):
+            text = pytesseract.image_to_string(image_path)
+            if len(text.strip()) > 30:
+                return "text"
+            return "natural"
 
-        st.markdown("### 📝 AI Image Description")
-        st.success(detailed_desc.content)
+        def extract_text(image_path):
+            return pytesseract.image_to_string(Image.open(image_path)).strip()
+
+        def describe_image(image_path):
+            processor, model = load_blip()
+            image = Image.open(image_path).convert("RGB")
+            inputs = processor(image, return_tensors="pt")
+            with torch.no_grad():
+                output = model.generate(**inputs, max_new_tokens=50)
+            return processor.decode(output[0], skip_special_tokens=True)
+
+        with st.spinner("Analyzing image..."):
+            image_type = classify_image(temp_path)
+
+        if image_type == "text":
+            extracted_content = extract_text(temp_path)
+            st.success("Text-heavy image detected!")
+        else:
+            extracted_content = describe_image(temp_path)
+            st.success("Natural image detected!")
 
         st.divider()
 
-        st.markdown("### 💬 Ask Questions About the Image")
-        img_question = st.text_input("Ask a question about this image:")
+        question = st.text_input("Ask a question about the image:")
 
-        if img_question:
-            with st.spinner("🤖 Thinking..."):
+        if question:
+            qa_prompt = f"""
+Analyze the content below and answer the question.
+If unclear, respond with "I don't know."
 
-                answer = llm.invoke(f"""
-Image description:
-{detailed_desc.content}
+Content:
+{extracted_content}
 
 Question:
-{img_question}
+{question}
 
-Answer clearly based only on the image description.
-""")
+Answer:
+"""
+            with st.spinner("Generating answer..."):
+                answer = generate_text_with_cohere(qa_prompt)
 
-            st.markdown("#### 🤖 AI Answer")
-            st.success(answer.content)
+            st.markdown("### 🤖 AI Answer")
+            st.success(answer)
