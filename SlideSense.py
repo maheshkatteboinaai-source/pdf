@@ -5,8 +5,7 @@ from PyPDF2 import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.prompts import ChatPromptTemplate
+from langchain.chains import RetrievalQA
 from langchain_google_genai import ChatGoogleGenerativeAI
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
@@ -25,10 +24,7 @@ def load_lottie(url: str):
         r = requests.get(url, timeout=5)
         if r.status_code != 200:
             return None
-        data = r.json()
-        if "v" not in data:
-            return None
-        return data
+        return r.json()
     except:
         return None
 
@@ -83,7 +79,6 @@ def login_ui():
                     st.session_state.users[nu] = np
                     st.success("Account created 🎉")
 
-# -------------------- AUTH CHECK --------------------
 if not st.session_state.authenticated:
     login_ui()
     st.stop()
@@ -98,7 +93,7 @@ if st.sidebar.button("Logout"):
 
 page = st.sidebar.radio("Mode", ["📘 PDF Analyzer", "🖼 Image Recognition"])
 
-# -------------------- GEMINI LLM --------------------
+# -------------------- GEMINI --------------------
 def get_llm():
     api_key = st.secrets.get("GOOGLE_API_KEY")
     if not api_key:
@@ -185,36 +180,19 @@ if page == "📘 PDF Analyzer":
 
         if q:
             with st.spinner("Generating answer..."):
-                docs = st.session_state.vector_db.similarity_search(q, k=5)
                 llm = get_llm()
+                retriever = st.session_state.vector_db.as_retriever(search_kwargs={"k": 5})
 
-                history = "\n".join(
-                    f"Q:{x}\nA:{y}" for x, y in st.session_state.chat_history[-5:]
+                qa_chain = RetrievalQA.from_chain_type(
+                    llm=llm,
+                    retriever=retriever,
+                    chain_type="stuff"
                 )
 
-                prompt = ChatPromptTemplate.from_template("""
-History:
-{history}
+                result = qa_chain.invoke(q)
+                answer = result["result"]
 
-Context:
-{context}
-
-Question:
-{question}
-
-Rules:
-- Answer only from document
-- If not found say: Information not found in the document
-""")
-
-                chain = create_stuff_documents_chain(llm, prompt)
-                res = chain.invoke({
-                    "context": docs,
-                    "question": q,
-                    "history": history
-                })
-
-                st.session_state.chat_history.append((q, res))
+                st.session_state.chat_history.append((q, answer))
 
         st.markdown("## 💬 AI Conversation")
         for q, a in st.session_state.chat_history:
@@ -249,7 +227,6 @@ if page == "🖼 Image Recognition":
 
         st.image(temp_path, use_container_width=True)
 
-        # --- IMAGE CLASSIFICATION ---
         def classify_image(image_path):
             text = pytesseract.image_to_string(image_path)
             if len(text.strip()) > 30:
