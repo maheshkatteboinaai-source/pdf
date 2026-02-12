@@ -15,6 +15,9 @@ import os
 import pytesseract
 from cohere import Client as CohereClient
 
+# Fix Tesseract path for Streamlit Cloud
+pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(page_title="SlideSense", page_icon="📘", layout="wide")
 
@@ -112,17 +115,23 @@ def get_cohere_client():
     if not api_key:
         st.error("Missing COHERE_API_KEY")
         st.stop()
-    return CohereClient(api_key=api_key, timeout=60)
+    return CohereClient(api_key=api_key)
 
 def generate_text_with_cohere(prompt):
-    cohere_client = get_cohere_client()
-    response = cohere_client.generate(
-        model="command-xlarge-nightly",
-        prompt=prompt,
-        temperature=0.7,
-        max_tokens=800,
-    )
-    return response.generations[0].text.strip()
+    client = get_cohere_client()
+
+    try:
+        response = client.chat(
+            model="command-r-plus",
+            message=prompt
+        )
+        return response.text
+    except:
+        response = client.chat(
+            model="command-r",
+            message=prompt
+        )
+        return response.text
 
 # ---------------- CACHE MODELS ----------------
 @st.cache_resource
@@ -141,16 +150,12 @@ def load_blip():
 # ================= PDF ANALYZER =================
 if page == "📘 PDF Analyzer":
 
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        safe_lottie(pdf_anim, 200)
-
-    with col2:
-        st.markdown("## 📘 PDF Analyzer")
+    st.markdown("## 📘 PDF Analyzer")
 
     pdf = st.file_uploader("Upload PDF", type="pdf")
 
     if pdf:
+
         if st.session_state.current_pdf != pdf.name:
             st.session_state.vector_db = None
             st.session_state.current_pdf = pdf.name
@@ -210,12 +215,7 @@ if page == "📘 PDF Analyzer":
 # ================= IMAGE RECOGNITION =================
 if page == "🖼 Image Recognition":
 
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        safe_lottie(image_anim, 200)
-
-    with col2:
-        st.markdown("## 🖼 VisionText Image QA")
+    st.markdown("## 🖼 VisionText Image QA")
 
     uploaded_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
 
@@ -231,8 +231,11 @@ if page == "🖼 Image Recognition":
             st.image(temp_path, use_container_width=True)
 
             def classify_image(path):
-                text = pytesseract.image_to_string(path)
-                return "text" if len(text.strip()) > 30 else "natural"
+                try:
+                    text = pytesseract.image_to_string(path)
+                    return "text" if len(text.strip()) > 30 else "natural"
+                except:
+                    return "natural"
 
             def extract_text(path):
                 return pytesseract.image_to_string(Image.open(path)).strip()
