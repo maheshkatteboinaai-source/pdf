@@ -2,8 +2,8 @@ streamlit
 streamlit-lottie
 requests
 PyPDF2
-langchain
-langchain-community
+langchain==0.1.16
+langchain-community==0.0.33
 langchain-google-genai
 langchain-huggingface
 transformers
@@ -12,3 +12,4 @@ faiss-cpu
 pytesseract
 cohere
 sentence-transformers
+Pillow
