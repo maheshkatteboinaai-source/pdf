@@ -13,9 +13,8 @@ import torch
 import tempfile
 import os
 import pytesseract
-from cohere import Client as CohereClient
 
-# Fix Tesseract path for Streamlit Cloud
+# Fix Tesseract path (Streamlit Cloud)
 pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
 
 # ---------------- PAGE CONFIG ----------------
@@ -109,30 +108,6 @@ def get_llm():
         google_api_key=api_key,
     )
 
-# ---------------- COHERE ----------------
-def get_cohere_client():
-    api_key = st.secrets.get("COHERE_API_KEY")
-    if not api_key:
-        st.error("Missing COHERE_API_KEY")
-        st.stop()
-    return CohereClient(api_key=api_key)
-
-def generate_text_with_cohere(prompt):
-    client = get_cohere_client()
-
-    try:
-        response = client.chat(
-            model="command-r-plus",
-            message=prompt
-        )
-        return response.text
-    except:
-        response = client.chat(
-            model="command-r",
-            message=prompt
-        )
-        return response.text
-
 # ---------------- CACHE MODELS ----------------
 @st.cache_resource
 def load_embeddings():
@@ -172,7 +147,7 @@ if page == "📘 PDF Analyzer":
                         text += str(content) + "\n"
 
                 if not text.strip():
-                    st.error("No readable text found in PDF.")
+                    st.error("No readable text found.")
                     st.stop()
 
                 splitter = RecursiveCharacterTextSplitter(
@@ -253,14 +228,14 @@ if page == "🖼 Image Recognition":
 
             if image_type == "text":
                 extracted_content = extract_text(temp_path)
-                st.success("Text-heavy image detected!")
             else:
                 extracted_content = describe_image(temp_path)
-                st.success("Natural image detected!")
 
             question = st.text_input("Ask about the image")
 
             if question:
+                llm = get_llm()
+
                 prompt = f"""
 Content:
 {extracted_content}
@@ -272,6 +247,6 @@ Answer:
 """
 
                 with st.spinner("Generating answer..."):
-                    answer = generate_text_with_cohere(prompt)
+                    answer = llm.invoke(prompt).content
 
                 st.success(answer)
