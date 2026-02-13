@@ -1,10 +1,10 @@
-streamlit
-PyPDF2
-langchain>=0.1.17
-langchain-community
-langchain-google-genai
-langchain-huggingface
-transformers
+streamlit==1.31.1
+PyPDF2==3.0.1
+langchain==0.1.17
+langchain-community==0.0.36
+langchain-google-genai==1.0.3
+langchain-huggingface==0.0.3
+transformers==4.39.3
 torch
 faiss-cpu
 sentence-transformers
