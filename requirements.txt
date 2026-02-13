@@ -10,6 +10,5 @@ transformers
 torch
 faiss-cpu
 pytesseract
-cohere
 sentence-transformers
 Pillow
